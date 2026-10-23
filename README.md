@@ -104,7 +104,7 @@ In the order I'd do them:
 3. **Note history.** Keep previous versions on every update and delete. That turns 412 conflicts into "see what changed and merge" and makes delete recoverable; soft delete alone would only do half of that.
 4. **Postgres for real deployment.** Multiple instances, full-text search (instead of `LIKE '%q%'`, which is ASCII-only case-insensitive and scans the team's notes), and migrations run by the deploy pipeline rather than at startup.
 5. **Cursor-based paging** on `(UpdatedAt, Id)`, so deep pages stay fast and an edit while someone is paging can't shift notes between pages.
-6. **Operational basics:** structured logging with request ids, a shared rate-limit store for multiple instances (per-user limiting exists, in memory), request size limits tighter than Kestrel's 30 MB default, and a container image.
+6. **Operational basics:** structured logging with request ids, a shared rate-limit store for multiple instances (per-user limiting exists, in memory), and a container image.
 
 What I'd **stop** doing: writing `.http` walkthroughs by hand. The scenarios already exist as integration tests, and with more time I'd generate API docs from the OpenAPI spec instead of maintaining a second copy of the examples.
 

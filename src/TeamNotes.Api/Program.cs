@@ -11,6 +11,10 @@ using TeamNotes.Api.Endpoints;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Largest valid note: 200-char title + 50,000-char body; even fully \uXXXX-escaped that is ~300 KB of JSON.
+// Cap request bodies at 1 MB (Kestrel's default is 30 MB) so oversized uploads get 413 before any parsing.
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = 1_048_576);
+
 // The connection string is read when the context is resolved, so test overrides applied at Build() are honoured.
 builder.Services.AddDbContext<NotesDbContext>((services, options) =>
 {
