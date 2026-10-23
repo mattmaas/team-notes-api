@@ -35,14 +35,4 @@ AI agents wrote most of the code and tests under my direction. I chose the scope
 
 ## History
 
-| Commit | Slice |
-|---|---|
-| 767cb09 | Scaffold, tooling, design doc |
-| d445828 | Schema, migration, demo seed |
-| db84b40 | Review fixes: seed is bootstrap-only and Development-gated |
-| 6564212 | Dependency advisories cleared on the .NET 8 line |
-| ac91935 | Demo identity, team listing, note create/read |
-| c7d2571 | This process document |
-| 9f5925d | Update and delete with optimistic concurrency |
-| d40c904 | Listing with paging and search |
-| 26cf4d8 | CI workflow |
+`git log --oneline` is the history: one commit per slice, in build order, each building and passing its tests. Commit messages explain why. A few early `docs:` commits only recorded the previous commit's hash in a table here; that table has been replaced by this pointer, because git already is the record.
