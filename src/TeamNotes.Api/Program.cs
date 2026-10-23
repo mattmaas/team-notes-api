@@ -31,7 +31,9 @@ static void InitializeDatabase(WebApplication app)
     var db = scope.ServiceProvider.GetRequiredService<NotesDbContext>();
     db.Database.Migrate();
 
-    if (app.Configuration.GetValue<bool>("Demo:SeedData"))
+    // Demo data needs the Development environment and an explicit opt-in, so a production host never seeds users
+    // even when the flag is left on. DevSeeder then seeds only a fresh database; see its remarks.
+    if (app.Environment.IsDevelopment() && app.Configuration.GetValue<bool>("Demo:SeedData"))
     {
         DevSeeder.Seed(db);
     }

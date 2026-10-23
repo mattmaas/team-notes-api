@@ -9,7 +9,8 @@ A small REST backend for notes shared among several small teams. Built with .NET
 Prerequisite: .NET 8 SDK (pinned in `global.json`).
 
 ```bash
-dotnet run --project src/TeamNotes.Api      # http://localhost:5080
+dotnet run --project src/TeamNotes.Api --launch-profile http
+# http://localhost:5080; profile sets ASPNETCORE_ENVIRONMENT=Development
 ```
 
 ## Test
