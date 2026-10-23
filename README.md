@@ -47,6 +47,8 @@ All endpoints:
 | PUT | `/teams/{teamId}/notes/{noteId}` | Replace `{ "title", "body" }`; requires `If-Match: "<version>"`; 200 with the new `ETag` |
 | DELETE | `/teams/{teamId}/notes/{noteId}` | Requires `If-Match`; 204. Only the author, or a team owner for team notes; other members get 403 |
 
+**Rate limit.** Each user gets 120 API requests per minute (configurable under `RateLimit`); over that is **429** with `Retry-After`. `/health` is not limited.
+
 **Concurrent edits.** Every note carries a version, returned as its `ETag`. Writes must echo it in `If-Match`. If a teammate saved first you get **412** with the current `ETag`, so nobody silently overwrites anyone. Missing `If-Match` is **428**; anything other than one strong tag like `"3"` is **400**.
 
 **Demo identity (Development only).** Send `X-User-Id` with a seeded user. This is impersonation for local review, not authentication; outside Development every protected endpoint returns 401.
@@ -102,7 +104,7 @@ In the order I'd do them:
 3. **Note history.** Keep previous versions on every update and delete. That turns 412 conflicts into "see what changed and merge" and makes delete recoverable; soft delete alone would only do half of that.
 4. **Postgres for real deployment.** Multiple instances, full-text search (instead of `LIKE '%q%'`, which is ASCII-only case-insensitive and scans the team's notes), and migrations run by the deploy pipeline rather than at startup.
 5. **Cursor-based paging** on `(UpdatedAt, Id)`, so deep pages stay fast and an edit while someone is paging can't shift notes between pages.
-6. **Operational basics:** structured logging with request ids, rate limiting, request size limits tighter than Kestrel's 30 MB default, and a container image.
+6. **Operational basics:** structured logging with request ids, a shared rate-limit store for multiple instances (per-user limiting exists, in memory), request size limits tighter than Kestrel's 30 MB default, and a container image.
 
 What I'd **stop** doing: writing `.http` walkthroughs by hand. The scenarios already exist as integration tests, and with more time I'd generate API docs from the OpenAPI spec instead of maintaining a second copy of the examples.
 

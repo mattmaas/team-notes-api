@@ -17,14 +17,16 @@ public sealed class TeamNotesFactory : WebApplicationFactory<Program>
     private readonly bool _seedData;
     private readonly string _environment;
     private readonly bool _headerAuth;
+    private readonly int? _rateLimitPermits;
 
-    public TeamNotesFactory(string? databasePath = null, bool seedData = true, string environment = "Development", bool headerAuth = true)
+    public TeamNotesFactory(string? databasePath = null, bool seedData = true, string environment = "Development", bool headerAuth = true, int? rateLimitPermits = null)
     {
         _ownsDatabaseFile = databasePath is null;
         DatabasePath = databasePath ?? NewDatabasePath();
         _seedData = seedData;
         _environment = environment;
         _headerAuth = headerAuth;
+        _rateLimitPermits = rateLimitPermits;
     }
 
     public string DatabasePath { get; }
@@ -56,6 +58,8 @@ public sealed class TeamNotesFactory : WebApplicationFactory<Program>
             ["ConnectionStrings:Notes"] = ConnectionString,
             ["Demo:SeedData"] = _seedData.ToString(),
             ["Demo:HeaderAuth"] = _headerAuth.ToString(),
+            // Tests fire many requests per user; a large default keeps the limiter out of the way unless a test sets one.
+            ["RateLimit:PermitLimit"] = (_rateLimitPermits ?? 100_000).ToString(),
         }));
     }
 

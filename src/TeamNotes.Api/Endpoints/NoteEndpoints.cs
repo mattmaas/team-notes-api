@@ -11,9 +11,9 @@ public static class NoteEndpoints
 {
     public static void MapNoteEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/me/teams", GetMyTeams).RequireAuthorization();
+        app.MapGet("/me/teams", GetMyTeams).RequireAuthorization().RequireRateLimiting(RateLimitPolicies.PerUser);
 
-        var notes = app.MapGroup("/teams/{teamId:guid}/notes").RequireAuthorization();
+        var notes = app.MapGroup("/teams/{teamId:guid}/notes").RequireAuthorization().RequireRateLimiting(RateLimitPolicies.PerUser);
         notes.MapGet("/", ListNotes);
         notes.MapPost("/", CreateNote);
         notes.MapGet("/{noteId:guid}", GetNote);

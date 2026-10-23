@@ -1,5 +1,8 @@
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi.Models;
 using TeamNotes.Api.Auth;
@@ -36,6 +39,30 @@ builder.Services
     .AddScheme<AuthenticationSchemeOptions, DemoHeaderAuthenticationHandler>(DemoHeaderAuthenticationHandler.SchemeName, null);
 builder.Services.AddAuthorization();
 
+// Per-user rate limit on the API (built into ASP.NET Core, no extra package). Partitioned by the authenticated user,
+// so one noisy client cannot starve a teammate. Over the limit: 429 with Retry-After. In-memory, per instance: fine
+// for this single-instance service; several instances would need a shared store. Limits are configuration.
+builder.Services.AddRateLimiter(options =>
+{
+    var permitLimit = builder.Configuration.GetValue("RateLimit:PermitLimit", 120);
+    var window = TimeSpan.FromSeconds(builder.Configuration.GetValue("RateLimit:WindowSeconds", 60));
+
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy(RateLimitPolicies.PerUser, http =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            http.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous",
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = permitLimit, Window = window, QueueLimit = 0 }));
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.Headers.RetryAfter = ((int)Math.Ceiling(window.TotalSeconds)).ToString();
+        await context.HttpContext.RequestServices.GetRequiredService<IProblemDetailsService>().WriteAsync(new ProblemDetailsContext
+        {
+            HttpContext = context.HttpContext,
+            ProblemDetails = { Status = StatusCodes.Status429TooManyRequests, Title = "Too many requests. Retry after the Retry-After interval." },
+        });
+    };
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -66,6 +93,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapNoteEndpoints();
@@ -90,3 +118,8 @@ static void InitializeDatabase(WebApplication app)
 
 // Exposes the implicit Program class to WebApplicationFactory<Program> in the test project.
 public partial class Program;
+
+public static class RateLimitPolicies
+{
+    public const string PerUser = "per-user";
+}
