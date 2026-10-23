@@ -16,6 +16,8 @@ public static class NoteEndpoints
         var notes = app.MapGroup("/teams/{teamId:guid}/notes").RequireAuthorization();
         notes.MapPost("/", CreateNote);
         notes.MapGet("/{noteId:guid}", GetNote).WithName(nameof(GetNote));
+        notes.MapPut("/{noteId:guid}", UpdateNote);
+        notes.MapDelete("/{noteId:guid}", DeleteNote);
     }
 
     private static async Task<Ok<List<TeamResponse>>> GetMyTeams(ClaimsPrincipal user, NotesDbContext db, CancellationToken ct)
@@ -64,7 +66,7 @@ public static class NoteEndpoints
         db.Notes.Add(note);
         await db.SaveChangesAsync(ct);
 
-        http.Response.Headers.ETag = ETag(note.Version);
+        http.Response.Headers.ETag = NoteETag.Format(note.Version);
         return TypedResults.Created($"/teams/{teamId}/notes/{note.Id}", NoteResponse.From(note));
     }
 
@@ -84,13 +86,150 @@ public static class NoteEndpoints
             return TypedResults.NotFound();
         }
 
-        http.Response.Headers.ETag = ETag(note.Version);
+        http.Response.Headers.ETag = NoteETag.Format(note.Version);
         return TypedResults.Ok(NoteResponse.From(note));
     }
 
+    /// <summary>
+    /// Replaces title and body. Order of checks: membership and visibility (404), If-Match (428/400), body
+    /// validation (400), then a single conditional UPDATE. The version check and increment happen inside that one SQL
+    /// statement, so two writers holding the same version cannot both succeed, whatever the timing.
+    /// </summary>
+    private static async Task<IResult> UpdateNote(
+        Guid teamId, Guid noteId, UpdateNoteRequest request, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
+    {
+        var userId = user.GetUserId();
+        if (await FindMembershipAsync(db, userId, teamId, ct) is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        var note = await FindNoteAsync(db, teamId, noteId, ct);
+        if (note is null || !NoteAccess.CanEdit(note, userId))
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (CheckIfMatch(http, out var expectedVersion) is { } preconditionError)
+        {
+            return preconditionError;
+        }
+
+        var errors = request.Validate();
+        if (errors.Count > 0)
+        {
+            return TypedResults.ValidationProblem(errors);
+        }
+
+        var title = request.Title!.Trim();
+        var body = request.Body!;
+        var now = DateTime.UtcNow;
+        var updated = await db.Notes
+            .Where(n => n.Id == noteId && n.TeamId == teamId && n.Version == expectedVersion)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(n => n.Title, title)
+                .SetProperty(n => n.Body, body)
+                .SetProperty(n => n.UpdatedAt, now)
+                .SetProperty(n => n.Version, n => n.Version + 1), ct);
+
+        if (updated == 0)
+        {
+            return await ConcurrencyFailureAsync(db, teamId, noteId, http, ct);
+        }
+
+        // Build the response from what this request wrote, not from a re-read: another writer may already have moved
+        // the note on (or deleted it) since our UPDATE committed, and this response must describe our version.
+        // Immutable fields (id, team, author, visibility, createdAt) come from the earlier read.
+        note.Title = title;
+        note.Body = body;
+        note.UpdatedAt = now;
+        note.Version = expectedVersion + 1;
+        http.Response.Headers.ETag = NoteETag.Format(note.Version);
+        return TypedResults.Ok(NoteResponse.From(note));
+    }
+
+    /// <summary>
+    /// Hard delete. Order: membership and visibility (404), permission (403), If-Match (428/400), then a single
+    /// conditional DELETE. A stale version returns 412, so nobody deletes an edit they have not seen.
+    /// </summary>
+    private static async Task<IResult> DeleteNote(
+        Guid teamId, Guid noteId, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
+    {
+        var userId = user.GetUserId();
+        var membership = await FindMembershipAsync(db, userId, teamId, ct);
+        if (membership is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        var note = await FindNoteAsync(db, teamId, noteId, ct);
+        if (note is null || !NoteAccess.CanRead(note, userId))
+        {
+            return TypedResults.NotFound();
+        }
+
+        if (!NoteAccess.CanDelete(note, userId, membership.Role))
+        {
+            return TypedResults.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Only the note's author or a team owner can delete it.");
+        }
+
+        if (CheckIfMatch(http, out var expectedVersion) is { } preconditionError)
+        {
+            return preconditionError;
+        }
+
+        var deleted = await db.Notes
+            .Where(n => n.Id == noteId && n.TeamId == teamId && n.Version == expectedVersion)
+            .ExecuteDeleteAsync(ct);
+
+        return deleted == 0
+            ? await ConcurrencyFailureAsync(db, teamId, noteId, http, ct)
+            : TypedResults.NoContent();
+    }
+
+    /// <summary>
+    /// The conditional write matched no row: either the version moved on (412, with the current ETag so the client
+    /// can re-read and retry) or the note was deleted meanwhile (404).
+    /// </summary>
+    private static async Task<IResult> ConcurrencyFailureAsync(
+        NotesDbContext db, Guid teamId, Guid noteId, HttpContext http, CancellationToken ct)
+    {
+        var current = await FindNoteAsync(db, teamId, noteId, ct);
+        if (current is null)
+        {
+            return TypedResults.NotFound();
+        }
+
+        http.Response.Headers.ETag = NoteETag.Format(current.Version);
+        return TypedResults.Problem(
+            statusCode: StatusCodes.Status412PreconditionFailed,
+            title: "The note was changed by someone else.",
+            detail: "Fetch the latest version and retry with its ETag in If-Match.");
+    }
+
+    /// <summary>Returns an error result when If-Match is missing (428) or not a single strong version tag (400).</summary>
+    private static IResult? CheckIfMatch(HttpContext http, out int expectedVersion) =>
+        NoteETag.TryParseIfMatch(http.Request.Headers.IfMatch, out expectedVersion) switch
+        {
+            NoteETag.ParseOutcome.Missing => TypedResults.Problem(
+                statusCode: StatusCodes.Status428PreconditionRequired,
+                title: "If-Match is required.",
+                detail: "Send the ETag you received when reading the note, e.g. If-Match: \"3\"."),
+            NoteETag.ParseOutcome.Malformed => TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "If-Match must be a single strong ETag such as \"3\".",
+                detail: "Weak tags, '*' and lists of tags are not supported."),
+            _ => null,
+        };
+
+    private static Task<Membership?> FindMembershipAsync(NotesDbContext db, Guid userId, Guid teamId, CancellationToken ct) =>
+        db.Memberships.AsNoTracking().SingleOrDefaultAsync(m => m.UserId == userId && m.TeamId == teamId, ct);
+
+    private static Task<Note?> FindNoteAsync(NotesDbContext db, Guid teamId, Guid noteId, CancellationToken ct) =>
+        db.Notes.AsNoTracking().SingleOrDefaultAsync(n => n.Id == noteId && n.TeamId == teamId, ct);
+
     private static Task<bool> IsMemberAsync(NotesDbContext db, Guid userId, Guid teamId, CancellationToken ct) =>
         db.Memberships.AnyAsync(m => m.UserId == userId && m.TeamId == teamId, ct);
-
-    /// <summary>Strong ETag carrying the note version, e.g. "3".</summary>
-    private static string ETag(int version) => $"\"{version}\"";
 }

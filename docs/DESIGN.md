@@ -6,7 +6,7 @@ Status labels describe evidence, not confidence: **Proposed**, **Implemented**, 
 
 A persistent REST backend where members of several small teams create private notes and collaborate on team-visible notes. Priorities: correctness, readable code and a reviewer being able to run the project without an external database.
 
-Implemented so far: schema, migration, development bootstrap, demo header identity, `GET /me/teams`, note create and read. Update, delete, listing/search and HTTP concurrency remain proposed. User/team administration, real authentication, cross-team sharing, history, soft deletion, tags and live collaboration are out of scope.
+Implemented so far: schema, migration, development bootstrap, demo header identity, `GET /me/teams`, note create, read, update and delete with optimistic concurrency. Listing/search remains proposed. User/team administration, real authentication, cross-team sharing, history, soft deletion, tags and live collaboration are out of scope.
 
 ## Data model - implemented, persistence tests passing
 
@@ -15,18 +15,18 @@ Implemented so far: schema, migration, development bootstrap, demo header identi
 - Membership: UserId, TeamId, Role (Member or Owner); composite primary key.
 - Note: Guid Id, TeamId, AuthorId, Title, Body, Visibility (Private or Team), UTC CreatedAt/UpdatedAt, integer Version starting at 1.
 
-The team contains the note; the author created it. Immutability of team/author/visibility is an upcoming API contract, not a database guarantee: entities currently have public setters.
+The team contains the note; the author created it. Team, author and visibility are immutable through the API (no endpoint writes them; PUT ignores them, tested). That is an API guarantee, not a database one: entities have public setters.
 
 Database safeguards:
 - Required properties and foreign keys connect membership to user/team and note to user/team. All deletes use RESTRICT, never cascade.
 - CHECK constraints cover allowed roles/visibility, version >= 1, title length 1..200 after SQLite space trimming, body length <= 50,000. SQLite does not enforce HasMaxLength.
 - Enums are stored as strings for readable data independent of ordinal numbering.
 - Index (TeamId, UpdatedAt) supports team listing; Membership(TeamId) supports team lookups. Stable listing also needs an Id tie-breaker in the future query.
-- Version is an EF concurrency token: a tracked save compares the original version in its SQL predicate. Writers must still increment it explicitly. This is not an automatic SQL counter or a completed HTTP If-Match implementation.
+- Version drives optimistic concurrency. API writes use `ExecuteUpdate`/`ExecuteDelete` with `Version = @expected` in the WHERE clause and `Version = Version + 1` in the same statement (see HTTP concurrency below). `Version` is also an EF concurrency token, which protects tracked `SaveChanges` writes (persistence tests) but is not what protects the API: bulk statements bypass the change tracker.
 
-### Validation at the HTTP boundary - verified for create
+### Validation at the HTTP boundary - verified for create and update
 
-Database constraints are a backstop, not the HTTP validator. SQLite length counts Unicode code points (and stops at NUL), while .NET string.Length counts UTF-16 code units, and SQLite trim() only strips ASCII spaces. `CreateNoteRequest.Validate` therefore applies the documented limits in UTF-16 units (stricter, so a valid request never trips a constraint), trims Unicode whitespace with .NET `Trim()`, rejects NUL, and requires `body` to be present (an empty string is allowed). Title is stored trimmed; body is stored exactly as sent. Violations return 400 ProblemDetails with an `errors` entry naming the field. Unknown visibility names (e.g. `"Public"`), numeric values and malformed JSON return 400 before the handler runs, because the enum converter rejects integers. Enum names are matched case-insensitively (`"team"` is accepted as `Team`), which is the System.Text.Json default and is harmless. A missing or wrong `Content-Type` returns 415, and bodies over Kestrel's 30 MB limit return 413; neither reaches the handler. Author membership of the team is enforced by the endpoint, not by a composite foreign key.
+Database constraints are a backstop, not the HTTP validator. SQLite length counts Unicode code points (and stops at NUL), while .NET string.Length counts UTF-16 code units, and SQLite trim() only strips ASCII spaces. `NoteValidation.Validate` (shared by create and update) therefore applies the documented limits in UTF-16 units (stricter, so a valid request never trips a constraint), trims Unicode whitespace with .NET `Trim()`, rejects NUL, and requires `body` to be present (an empty string is allowed). Title is stored trimmed; body is stored exactly as sent. Violations return 400 ProblemDetails with an `errors` entry naming the field. Unknown visibility names (e.g. `"Public"`), numeric values and malformed JSON return 400 before the handler runs, because the enum converter rejects integers. Enum names are matched case-insensitively (`"team"` is accepted as `Team`), which is the System.Text.Json default and is harmless. A missing or wrong `Content-Type` returns 415, and bodies over Kestrel's 30 MB limit return 413; neither reaches the handler. Author membership of the team is enforced by the endpoint, not by a composite foreign key.
 
 Timestamps: SQLite drops DateTimeKind, so `NoteResponse.From` marks stored values as UTC. A test reads a note back through GET and asserts both timestamps end in `Z`.
 
@@ -58,12 +58,12 @@ This is impersonation for local review, not security. Because it is a real authe
 | GET | /teams/{teamId}/notes | Visible notes, bounded paging, optional literal search | Proposed |
 | POST | /teams/{teamId}/notes | Create; 201, Location and strong ETag `"1"` | Verified |
 | GET | /teams/{teamId}/notes/{noteId} | Visible note and ETag | Verified |
-| PUT | /teams/{teamId}/notes/{noteId} | Replace title/body; If-Match required | Proposed |
-| DELETE | /teams/{teamId}/notes/{noteId} | Hard delete; If-Match required | Proposed |
+| PUT | /teams/{teamId}/notes/{noteId} | Replace title/body; If-Match required; 200 + new ETag | Verified |
+| DELETE | /teams/{teamId}/notes/{noteId} | Hard delete; If-Match required; 204 | Verified |
 
-Every note operation requires current team membership. Non-member, unknown team, unknown note, hidden private note and wrong team/note pairing return 404, so ids cannot be probed. Tests assert the status for each case and byte-identical bodies for hidden versus missing notes; an independent probe also found the bodies identical for the other cases. Membership is checked before validation, so a non-member posting an invalid body also gets 404, not field errors. A visible resource with a forbidden operation will return 403 (delete by a non-author member, proposed). Routes that are not built yet answer 405 with an `Allow` header for the verbs that exist; that goes away as they are implemented.
+Every note operation requires current team membership. Non-member, unknown team, unknown note, hidden private note and wrong team/note pairing return 404, so ids cannot be probed. Tests assert the status for each case and byte-identical bodies for hidden versus missing notes; an independent probe also found the bodies identical for the other cases. Membership is checked before validation, so a non-member posting an invalid body also gets 404, not field errors. A visible resource with a forbidden operation returns 403 ProblemDetails: today that is only a delete by a member who is neither the author nor a team owner. The list route (not built yet) answers 405 with an `Allow` header; that goes away when listing is implemented.
 
-The request body carries only title, body and visibility. Id, author, team, version and timestamps come from the server; a test posts forged `id`/`authorId`/`teamId`/`version` and checks they are ignored. Visibility rules live in one function, `NoteAccess.CanRead`, so the coming list query and single reads cannot drift apart.
+The create body carries only title, body and visibility; the update body only title and body. Id, author, team, version, timestamps (and, on update, visibility) come from the server; tests send forged values to both and check they are ignored. Access rules live in `NoteAccess` (`CanRead`, `CanEdit`, `CanDelete`), so endpoints and the coming list query cannot drift apart.
 
 | Operation | Private note | Team-visible note |
 |---|---|---|
@@ -73,9 +73,26 @@ The request body carries only title, body and visibility. Id, author, team, vers
 
 Owners cannot override private-note access. Visibility defaults to Private and is immutable through the API in this version. Caller identity, author, timestamps and versions are never trusted from request-body metadata.
 
-### HTTP concurrency - proposed
+### HTTP concurrency - verified
 
-Authorize before evaluating preconditions. Support one strong quoted version ETag. Missing If-Match returns 428, malformed or unsupported form 400, stale value 412. Atomic conditional update/delete prevents lost writes. A read followed by a write is safe only if the WRITE includes the expected version predicate; an unconditional write is not.
+ETags are strong and carry the version: `"3"`. Writes must send exactly one in `If-Match`.
+
+| Check, in order | PUT | DELETE |
+|---|---|---|
+| 1. Member of team, note exists under that team, caller can see it | else 404 | else 404 |
+| 2. Caller may perform the operation | anyone who can see can edit | else 403 |
+| 3. If-Match present | else 428 | else 428 |
+| 4. If-Match is one strong canonical tag: `"1"`, not `1`, `W/"1"`, `*`, lists, `"01"`, `"0"`, negatives or overflow | else 400 | else 400 |
+| 5. Body valid | else 400 | not applicable |
+| 6. One conditional SQL statement: `WHERE Id AND TeamId AND Version = expected` | 0 rows: 412 with current ETag, or 404 if deleted meanwhile | same |
+
+Why this order: visibility first so 428, 412 and 403 never reveal a hidden note (tested: a non-member without If-Match gets 404, not 428). Permission before precondition, so a request that can never succeed says why. Precondition before validation, because a client without a version has to re-read anyway.
+
+Why the precondition lives in the SQL: checking the version in C# and then writing unconditionally leaves a window in which two writers holding the same version both pass the check. A mutant built that way fails the simultaneous-edit tests intermittently (both outcomes appeared over 16 runs): that is the lost update. With the version in the WHERE clause SQLite serialises the two statements and the second matches zero rows. The SQL captured during review is a single `UPDATE ... SET Version = Version + 1 ... WHERE Id = @id AND TeamId = @team AND Version = @expected`.
+
+The 200 response is built from what this request wrote (version = expected + 1), not from a re-read. A re-read can return a later writer's content and version, or nothing if the note was deleted in between; the review reproduced this (4 of 1200 responses under load). A test uses a SQLite trigger to make that interleaving deterministic.
+
+Rejected: `*` and weak tags (the client must name the version it edited, otherwise the protection is optional); `If-Unmodified-Since` (one-second resolution); pessimistic locks (no fit for disconnected HTTP clients); last-write-wins (silently loses a teammate's edit). Changing visibility is out of scope; adding it later must use the same conditional write.
 
 ## Decision record
 
@@ -98,6 +115,9 @@ Authorize before evaluating preconditions. Support one strong quoted version ETa
 | D15 | Remediate advisories by moving to the latest .NET 8 servicing packages plus a runtime engine-version test; verified | Smallest fix that stays on .NET 8 and supported dependency combinations. The test also catches a future downgrade. Rejected: suppressions, EF 9/10, manual native-provider pinning. |
 | D16 | 404 for every invisible or unknown resource, including non-member team access; verified | Hides whether a team or note exists. Hidden and missing notes return byte-identical responses. Cost: a user who mistypes a team id gets the same answer as an outsider; acceptable for opaque ids. |
 | D17 | Typed minimal-API handlers in one static `NoteEndpoints` class; validation on the request record; no service layer yet | Few endpoints and EF already acts as unit of work. A service class with one caller would only forward calls. Revisit if rules start being reused across endpoints. Rejected: controllers, MediatR, FluentValidation (a new package for five rules). |
+| D18 | Optimistic concurrency with a strong version ETag, enforced by one conditional SQL statement per write; verified | Prevents lost updates between teammates without locks. The order 404 → 403 → 428/400 → 400 → 412 hides private notes and gives actionable errors. Rejected alternatives are listed under HTTP concurrency. |
+| D19 | Delete narrower than edit: author, or team owner for team notes; verified | Editing is collaboration and versioned; deletion is permanent with no history, so it is limited to the person who wrote the note or the person accountable for the team. Owners still cannot delete private notes they cannot see (404). |
+| D20 | `ExecuteUpdate`/`ExecuteDelete` rather than load-modify-`SaveChanges`; implemented | One round trip, and the precondition is guaranteed to be in the statement rather than relying on the tracked entity's original value. Cost: these bulk statements bypass the change tracker and the EF concurrency token, so the version predicate must be written explicitly (mutation-tested). |
 
 ## Dependencies and security audit
 
@@ -121,6 +141,12 @@ RESOLVED - the audit had reported High advisories for SQLitePCLRaw.lib.e_sqlite3
 | API slice: identity, /me/teams, create, read | dotnet test TeamNotes.sln | 63 passed, 0 failed |
 | API slice independent review (worker agent, read-only plus real HTTP probes) | Production fail-closed, error leakage, 500 hunting, contract vs docs | No security blockers. No 500s from null/empty/array bodies, wrong types, 2 MB/35 MB payloads; injected exception returns a generic 500 in Development and Production. Found: `/me/teams` ordering untested (order-reversal mutant passed), lenient GUID formats accepted, no WWW-Authenticate, missing tests for repeated header / 401 shape / body NUL / Swagger off in Production, three doc overclaims |
 | Review fixes | dotnet test; mutants | 72 passed. Order-reversal mutant now fails 2 tests; lenient `Guid.TryParse` mutant fails 2 tests. Whitespace around the header is not tested as invalid: HTTP strips it before the handler sees it |
+| Update/delete slice: tests first | dotnet test | 39 new tests failed (no routes), 72 existing passed |
+| Update/delete slice | dotnet test; build -warnaserror | 111 passed; 0 warnings/errors. Simultaneous-edit tests passed 15/15 repeated runs |
+| Update/delete mutants (isolated copies) | no version in UPDATE WHERE; no version in DELETE WHERE; C# check + unconditional SQL; no version increment; skip CanDelete; skip CanEdit; If-Match after validation; If-Match before permission; 412 without ETag | Every mutant fails at least one test. The C#-check mutant fails intermittently, which is the race itself |
+| Update/delete real process | dotnet run Development, PowerShell | PUT no If-Match 428; `*` 400; `"1"` 200 ETag "2"; stale 412 ETag "2"; Bob DELETE 403; stale DELETE 412; Alice DELETE `"2"` 204; GET 404 |
+| Update/delete independent review (worker agent, read-only) | captured SQL, 30-way PUT burst, 150-round PUT/DELETE race, probes | Single conditional UPDATE/DELETE confirmed; 1 OK + 29 x 412, zero 5xx. Found: success response re-read could return another writer's state or 500 if deleted (fixed: response built from our write, trigger test); `"01"` accepted (fixed); DELETE malformed-If-Match matrix untested (added); missing 401 and title-boundary tests on PUT (added); stale DESIGN line about the EF token (fixed) |
+| Review fixes | dotnet test; re-read mutant | 127 passed. Restoring the re-read makes the trigger test fail |
 | API slice mutation checks (isolated copies) | remove CanRead / owner override / skip membership / ignore team id on GET / ignore environment in auth / default Team visibility / drop UTC kind | Each mutant fails at least one test. The environment-check mutant was first missed: the original test had no seeded user. Fixed by seeding in Development and restarting as Production. |
 | API slice real process | dotnet run Development, fresh DB, PowerShell requests | 401 without header; Bob's teams listed; create 201 with ETag "1" and Location; Bob → Alice's private note 404; invalid title 400 ProblemDetails; Swagger JSON 200 |
 | Audit build | dotnet build TeamNotes.sln -warnaserror | 0 warnings, 0 errors; not a dependency security clearance |
@@ -132,9 +158,11 @@ Corrected duplicate-membership expectation is based on the EF/SQLite boundary: a
 
 ## Review limits / next checks
 
-- Update, delete, listing/search and HTTP concurrency (If-Match, 428/400/412) are not implemented yet; no claim of service completion.
+- Listing/search is not implemented yet; no claim of service completion.
 - Seed rollback is now fault-injection tested. Real power-loss, disk-full and migration-failure recovery are not exercised.
-- Still to test with the next endpoints: precondition order, simultaneous HTTP writes, hidden notes excluded from list results and pagination.
+- Still to test with listing: hidden notes excluded from results and from page counts, stable ordering, bounds.
+- No `If-None-Match` support on GET (conditional reads / 304). Clients can still compare ETags themselves.
+- Membership is checked when a write starts, not inside the conditional statement. No endpoint changes memberships, so it cannot go stale today; adding membership administration would need the membership check folded into the write or a transaction.
 - Request body size relies on Kestrel's default 30 MB limit; the 50,000-character body limit is enforced after parsing. A tighter per-endpoint body limit is a hardening item.
 - SQLite is a single-instance choice, not a backup or multi-instance strategy. Backups, schema upgrade testing on existing deployments, disk-full/busy behavior and retention belong to operational hardening.
 - Startup migration failures propagate rather than starting a misleadingly healthy service. Unrecoverable manually inconsistent databases require explicit repair, not automatic resets.
@@ -146,3 +174,4 @@ Corrected duplicate-membership expectation is based on the EF/SQLite boundary: a
 - Persistence audit: corrected fixture ownership, explicit Development gating, deletion-preserving bootstrap, stronger assertions, independent boundary values, rollback fault injection and 24 tests. Corrects earlier overclaims about seeding, authentication and concurrency. Dependency audit remains open as noted above.
 - Dependency remediation: EF Core / Mvc.Testing 8.0.32, xunit 2.9.3 tooling, engine-version regression test; audit clean.
 - API slice 1: demo header authentication scheme, /me/teams, note create/read with membership and visibility, HTTP validation, UTC JSON, ProblemDetails, Swagger, requests.http; 72 tests after independent review fixes.
+- API slice 2: PUT and DELETE with If-Match (428/400/412) enforced by a single conditional SQL statement, delete permission 403, simultaneous-edit tests; 127 tests.

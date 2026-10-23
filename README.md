@@ -21,7 +21,7 @@ dotnet test
 
 ## API overview
 
-Implemented so far (update, delete and listing are next):
+Implemented so far (listing is next):
 
 | Method | Route | Result |
 |---|---|---|
@@ -29,6 +29,10 @@ Implemented so far (update, delete and listing are next):
 | GET | `/me/teams` | Your teams and your role in each |
 | POST | `/teams/{teamId}/notes` | 201 with `Location` and `ETag`; body `{ "title", "body", "visibility": "Private" \| "Team" }` (default Private) |
 | GET | `/teams/{teamId}/notes/{noteId}` | 200 with `ETag`, or 404 if it doesn't exist or you can't see it |
+| PUT | `/teams/{teamId}/notes/{noteId}` | Replace `{ "title", "body" }`; requires `If-Match: "<version>"`; 200 with the new `ETag` |
+| DELETE | `/teams/{teamId}/notes/{noteId}` | Requires `If-Match`; 204. Only the author, or a team owner for team notes; other members get 403 |
+
+**Concurrent edits.** Every note carries a version, returned as its `ETag`. Writes must echo it in `If-Match`. If a teammate saved first you get **412** with the current `ETag`, so nobody silently overwrites anyone. Missing `If-Match` is **428**; anything other than one strong tag like `"3"` is **400**.
 
 **Demo identity (Development only).** Send `X-User-Id` with a seeded user. This is impersonation for local review, not authentication; outside Development every protected endpoint returns 401.
 

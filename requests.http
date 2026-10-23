@@ -65,3 +65,51 @@ X-User-Id: {{alice}}
 Content-Type: application/json
 
 { "title": "Intrusion", "body": "" }
+
+### ---- Editing and concurrency ----
+### Run these in order; they start from the seeded welcome note at version 1.
+
+### Bob edits the shared note with the version he read -> 200, ETag "2"
+PUT {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{bob}}
+If-Match: "1"
+Content-Type: application/json
+
+{ "title": "Welcome to Apollo (edited by Bob)", "body": "Updated agenda" }
+
+### Alice still holds version 1 -> 412, response ETag tells her the current version
+PUT {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{alice}}
+If-Match: "1"
+Content-Type: application/json
+
+{ "title": "Alice's edit", "body": "" }
+
+### No If-Match -> 428
+PUT {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{alice}}
+Content-Type: application/json
+
+{ "title": "Blind write", "body": "" }
+
+### Wildcard is not accepted -> 400
+PUT {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{alice}}
+If-Match: *
+Content-Type: application/json
+
+{ "title": "Blind write", "body": "" }
+
+### Bob can edit but not delete Alice's team note -> 403
+DELETE {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{bob}}
+If-Match: "2"
+
+### Alice (author and owner) deletes with the current version -> 204
+DELETE {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{alice}}
+If-Match: "2"
+
+### Gone -> 404
+GET {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
+X-User-Id: {{alice}}
