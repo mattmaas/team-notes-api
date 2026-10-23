@@ -40,4 +40,4 @@ AI agents wrote most of the code and tests under my direction. I chose the scope
 | 6564212 | Dependency advisories cleared on the .NET 8 line |
 | ac91935 | Demo identity, team listing, note create/read |
 | c7d2571 | This process document |
-| (next) | Update and delete with optimistic concurrency |
+| 9f5925d | Update and delete with optimistic concurrency |
