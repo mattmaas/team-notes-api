@@ -126,7 +126,7 @@ public static class NoteEndpoints
         return TypedResults.Created($"/teams/{teamId}/notes/{note.Id}", NoteResponse.From(note));
     }
 
-    private static async Task<Results<Ok<NoteResponse>, NotFound>> GetNote(
+    private static async Task<Results<Ok<NoteResponse>, StatusCodeHttpResult, NotFound>> GetNote(
         Guid teamId, Guid noteId, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
     {
         var userId = user.GetUserId();
@@ -142,7 +142,18 @@ public static class NoteEndpoints
             return TypedResults.NotFound();
         }
 
-        http.Response.Headers.ETag = NoteETag.Format(note.Version);
+        var etag = NoteETag.Format(note.Version);
+        http.Response.Headers.ETag = etag;
+
+        // Conditional GET, checked only after access so it never reveals a hidden note: if the client already holds
+        // this version, answer 304 with no body. Weak comparison per RFC 9110, so W/"3" also matches "3".
+        if (http.Request.Headers.IfNoneMatch.Any(value => value is not null && value.Split(',')
+                .Select(tag => tag.Trim())
+                .Any(tag => tag == "*" || tag == etag || tag == "W/" + etag)))
+        {
+            return TypedResults.StatusCode(StatusCodes.Status304NotModified);
+        }
+
         return TypedResults.Ok(NoteResponse.From(note));
     }
 

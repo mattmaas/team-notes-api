@@ -35,13 +35,13 @@ jobs:
       DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No NuGet cache: setup-dotnet's cache keys on packages.lock.json, which this repo does not use, and restore
       # takes seconds for two projects.
       # global.json accepts any .NET 8 SDK (8.0.100+, latestFeature) and rejects 9+; CI installs the newest 8.0.
       - name: Set up .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.0.x"
 
@@ -69,7 +69,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.os }}
           path: TestResults/*.trx

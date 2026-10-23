@@ -43,7 +43,7 @@ All endpoints:
 | GET | `/me/teams` | Your teams and your role in each |
 | GET | `/teams/{teamId}/notes?page=1&pageSize=20&q=text` | Notes you can see, newest first: `{ items, page, pageSize, totalCount }`. Items are summaries (no body). `pageSize` 1–100; `q` is a literal, case-insensitive (ASCII) match on title or body |
 | POST | `/teams/{teamId}/notes` | 201 with `Location` and `ETag`; body `{ "title", "body", "visibility": "Private" \| "Team" }` (default Private) |
-| GET | `/teams/{teamId}/notes/{noteId}` | 200 with `ETag`, or 404 if it doesn't exist or you can't see it |
+| GET | `/teams/{teamId}/notes/{noteId}` | 200 with `ETag`, or 404 if it doesn't exist or you can't see it. Send `If-None-Match: "<version>"` to get 304 (no body) when unchanged |
 | PUT | `/teams/{teamId}/notes/{noteId}` | Replace `{ "title", "body" }`; requires `If-Match: "<version>"`; 200 with the new `ETag` |
 | DELETE | `/teams/{teamId}/notes/{noteId}` | Requires `If-Match`; 204. Only the author, or a team owner for team notes; other members get 403 |
 
@@ -102,7 +102,7 @@ In the order I'd do them:
 3. **Note history.** Keep previous versions on every update and delete. That turns 412 conflicts into "see what changed and merge" and makes delete recoverable; soft delete alone would only do half of that.
 4. **Postgres for real deployment.** Multiple instances, full-text search (instead of `LIKE '%q%'`, which is ASCII-only case-insensitive and scans the team's notes), and migrations run by the deploy pipeline rather than at startup.
 5. **Cursor-based paging** on `(UpdatedAt, Id)`, so deep pages stay fast and an edit while someone is paging can't shift notes between pages.
-6. **Operational basics:** structured logging with request ids, rate limiting, request size limits tighter than Kestrel's 30 MB default, a container image, and `If-None-Match`/304 for cheap re-reads.
+6. **Operational basics:** structured logging with request ids, rate limiting, request size limits tighter than Kestrel's 30 MB default, and a container image.
 
 What I'd **stop** doing: writing `.http` walkthroughs by hand. The scenarios already exist as integration tests, and with more time I'd generate API docs from the OpenAPI spec instead of maintaining a second copy of the examples.
 

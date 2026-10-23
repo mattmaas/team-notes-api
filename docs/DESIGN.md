@@ -57,7 +57,7 @@ This is impersonation for local review, not security. Because it is a real authe
 | GET | /me/teams | Caller teams and roles, ordered by name | Verified |
 | GET | /teams/{teamId}/notes | Visible notes as summaries, newest first, paged, optional literal search | Verified |
 | POST | /teams/{teamId}/notes | Create; 201, Location and strong ETag `"1"` | Verified |
-| GET | /teams/{teamId}/notes/{noteId} | Visible note and ETag | Verified |
+| GET | /teams/{teamId}/notes/{noteId} | Visible note and ETag; `If-None-Match` with the current ETag returns 304 (checked after access, so never for hidden notes) | Verified |
 | PUT | /teams/{teamId}/notes/{noteId} | Replace title/body; If-Match required; 200 + new ETag | Verified |
 | DELETE | /teams/{teamId}/notes/{noteId} | Hard delete; If-Match required; 204 | Verified |
 
@@ -192,6 +192,7 @@ RESOLVED - the audit had reported High advisories for SQLitePCLRaw.lib.e_sqlite3
 | Checkpoint | dotnet test; build -warnaserror; fresh-clone journey | 176 passed; 0 warnings; clone, run with `--launch-profile http`, create, edit, stale 412, list, restart with data kept |
 | First hosted CI run (GitHub Actions run 40032898874, commit 7c2d1d3) | push to main | Both jobs succeeded: Ubuntu 176 passed in 5 s, Windows 176 passed; restore audit passed, 0 build warnings, no vulnerable packages. SDK 8.0.426 installed by setup-dotnet. Only annotations: Node.js 20 deprecation for the v4 actions |
 | Grader journey (fresh clone of https://github.com/mattmaas/team-notes-api, README followed) | build, run with launch profile, requests, restart, test | 0 warnings; health 200, Swagger 200, no identity 401, create 201 ETag "1", non-member 404, PUT without If-Match 428, edit 200 ETag "2", stale edit 412, list total 2, delete 204, after restart total 1, 176 tests passed |
+| Stretch: conditional GET + CI action bump (branch feat/stretch) | dotnet test; mutant | 183 passed (7 new). Moving the 304 check before the access check fails the hidden-note test. CI actions moved to checkout v7, setup-dotnet v6, upload-artifact v7 (Node 24; inputs checked against each action.yml) |
 | API slice mutation checks (isolated copies) | remove CanRead / owner override / skip membership / ignore team id on GET / ignore environment in auth / default Team visibility / drop UTC kind | Each mutant fails at least one test. The environment-check mutant was first missed: the original test had no seeded user. Fixed by seeding in Development and restarting as Production. |
 | API slice real process | dotnet run Development, fresh DB, PowerShell requests | 401 without header; Bob's teams listed; create 201 with ETag "1" and Location; Bob → Alice's private note 404; invalid title 400 ProblemDetails; Swagger JSON 200 |
 | Audit build | dotnet build TeamNotes.sln -warnaserror | 0 warnings, 0 errors; not a dependency security clearance |
@@ -204,11 +205,9 @@ Corrected duplicate-membership expectation is based on the EF/SQLite boundary: a
 ## Review limits / next checks
 
 - All contract endpoints are implemented. Remaining work is delivery (README, final review), not features.
-- GitHub Actions warns that actions/checkout, setup-dotnet and upload-artifact v4 run on a deprecated Node.js 20 runtime (forced to Node 24 for now). Bumping to their current majors is a small follow-up, deferred so the first verified pipeline stays unchanged.
 - Seed rollback is now fault-injection tested. Real power-loss, disk-full and migration-failure recovery are not exercised.
 - Listing limits (ASCII-only case folding, scan-based search, offset paging, count/page gap) are described under "Listing and search".
 - Ids stored in lowercase (only possible through raw SQL or an import, never through the API) would sort after uppercase ones and break the total order for those rows.
-- No `If-None-Match` support on GET (conditional reads / 304). Clients can still compare ETags themselves.
 - Membership is checked when a write starts, not inside the conditional statement. No endpoint changes memberships, so it cannot go stale today; adding membership administration would need the membership check folded into the write or a transaction.
 - Request body size relies on Kestrel's default 30 MB limit; the 50,000-character body limit is enforced after parsing. A tighter per-endpoint body limit is a hardening item.
 - SQLite is a single-instance choice, not a backup or multi-instance strategy. Backups, schema upgrade testing on existing deployments, disk-full/busy behavior and retention belong to operational hardening.
