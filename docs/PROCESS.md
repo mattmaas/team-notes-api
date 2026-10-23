@@ -45,4 +45,4 @@ AI agents wrote most of the code and tests under my direction. I chose the scope
 | c7d2571 | This process document |
 | 9f5925d | Update and delete with optimistic concurrency |
 | d40c904 | Listing with paging and search |
-| (next) | CI workflow |
+| 26cf4d8 | CI workflow |
