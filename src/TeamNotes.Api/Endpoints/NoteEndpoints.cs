@@ -14,6 +14,7 @@ public static class NoteEndpoints
         app.MapGet("/me/teams", GetMyTeams).RequireAuthorization();
 
         var notes = app.MapGroup("/teams/{teamId:guid}/notes").RequireAuthorization();
+        notes.MapGet("/", ListNotes);
         notes.MapPost("/", CreateNote);
         notes.MapGet("/{noteId:guid}", GetNote).WithName(nameof(GetNote));
         notes.MapPut("/{noteId:guid}", UpdateNote);
@@ -31,6 +32,61 @@ public static class NoteEndpoints
                 select new TeamResponse(team.Id, team.Name, membership.Role))
             .ToListAsync(ct);
         return TypedResults.Ok(teams);
+    }
+
+    /// <summary>
+    /// Lists the notes the caller can read, newest first. Visibility is part of the SQL WHERE clause, so hidden notes
+    /// never reach COUNT, OFFSET or LIMIT: page sizes and totals reveal nothing about other people's private notes.
+    /// </summary>
+    private static async Task<Results<Ok<NotePage>, ValidationProblem, NotFound>> ListNotes(
+        Guid teamId, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
+    {
+        var userId = user.GetUserId();
+        if (!await IsMemberAsync(db, userId, teamId, ct))
+        {
+            return TypedResults.NotFound();
+        }
+
+        var (pageNumber, size, search) = NoteListQuery.Parse(http.Request.Query, out var errors);
+        if (errors.Count > 0)
+        {
+            return TypedResults.ValidationProblem(errors);
+        }
+
+        var visible = db.Notes.AsNoTracking()
+            .Where(n => n.TeamId == teamId)
+            .Where(NoteAccess.ReadableBy(userId));
+
+        if (search is not null)
+        {
+            // SQLite LIKE folds case for ASCII letters only; see DESIGN.md "Listing and search" for the trade-off.
+            var pattern = NoteListQuery.ToLikePattern(search);
+            visible = visible.Where(n =>
+                EF.Functions.Like(n.Title, pattern, NoteListQuery.LikeEscape)
+                || EF.Functions.Like(n.Body, pattern, NoteListQuery.LikeEscape));
+        }
+
+        var totalCount = await visible.CountAsync(ct);
+
+        // Id breaks ties between equal timestamps, so the order is total and pages never repeat or skip a note.
+        var items = await visible
+            .OrderByDescending(n => n.UpdatedAt)
+            .ThenByDescending(n => n.Id)
+            .Skip((pageNumber - 1) * size)
+            .Take(size)
+            .Select(n => new NoteSummary(n.Id, n.TeamId, n.AuthorId, n.Title, n.Visibility, n.CreatedAt, n.UpdatedAt, n.Version))
+            .ToListAsync(ct);
+
+        // SQLite drops DateTimeKind; values are written as UTC, so mark them UTC to serialize with "Z".
+        var utcItems = items
+            .Select(i => i with
+            {
+                CreatedAt = DateTime.SpecifyKind(i.CreatedAt, DateTimeKind.Utc),
+                UpdatedAt = DateTime.SpecifyKind(i.UpdatedAt, DateTimeKind.Utc),
+            })
+            .ToList();
+
+        return TypedResults.Ok(new NotePage(utcItems, pageNumber, size, totalCount));
     }
 
     private static async Task<Results<Created<NoteResponse>, ValidationProblem, NotFound>> CreateNote(

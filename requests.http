@@ -113,3 +113,33 @@ If-Match: "2"
 ### Gone -> 404
 GET {{baseUrl}}/teams/{{apollo}}/notes/{{welcomeNote}}
 X-User-Id: {{alice}}
+
+### ---- Listing and search ----
+
+### Bob's view of Apollo: only the team note (Alice's private draft is filtered out, also from totalCount)
+GET {{baseUrl}}/teams/{{apollo}}/notes
+X-User-Id: {{bob}}
+
+### Alice's view: both notes
+GET {{baseUrl}}/teams/{{apollo}}/notes
+X-User-Id: {{alice}}
+
+### Paging
+GET {{baseUrl}}/teams/{{apollo}}/notes?page=1&pageSize=1
+X-User-Id: {{alice}}
+
+### Search is literal: "%" matches a percent sign, not everything -> 0 results
+GET {{baseUrl}}/teams/{{apollo}}/notes?q=%25
+X-User-Id: {{bob}}
+
+### Searching for words in a note Bob cannot see finds nothing -> totalCount 0
+GET {{baseUrl}}/teams/{{apollo}}/notes?q=private
+X-User-Id: {{bob}}
+
+### pageSize over 100 -> 400 naming pageSize (not silently clamped)
+GET {{baseUrl}}/teams/{{apollo}}/notes?pageSize=500
+X-User-Id: {{bob}}
+
+### Carol is not in Apollo -> 404
+GET {{baseUrl}}/teams/{{apollo}}/notes
+X-User-Id: {{carol}}

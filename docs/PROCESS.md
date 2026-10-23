@@ -7,11 +7,12 @@ A short record of the working process, kept current as the project moves. Design
 1. **Agree the contract first.** Each slice starts from rules written in DESIGN.md (status codes, access matrix, limits), so tests can be written from the spec instead of from the code. Tests are written before the endpoint and run red first (update/delete: 39 failing, 72 passing).
 2. **Tests at the HTTP seam.** Integration tests drive the real app through `WebApplicationFactory` against a real SQLite file per test. Expected values come from the spec or seeded fixture, not from production constants.
 3. **Implement the smallest thing that passes.**
-4. **Prove the tests can fail.** For each important rule, a deliberately broken copy of the code (in a temp folder, never the repo) must fail at least one test. This has caught real gaps three times: an auth test that passed for the wrong reason, an ordering claim nothing tested, and a race test that could not see a stale response.
+4. **Prove the tests can fail.** For each important rule, a deliberately broken copy of the code (in a temp folder, never the repo) must fail at least one test. This has caught real gaps four times: an auth test that passed for the wrong reason, an ordering claim nothing tested, a race test that could not see a stale response, and a tie-break test that passed without the tie-breaker because EF reordered a batch of inserts.
    For concurrency, mutation testing is also how the design is justified: a "check version in C#, then write" mutant fails the race tests intermittently, which shows the race is real and the conditional SQL is what closes it. Where a race is too rare to catch reliably, a SQLite trigger forces the interleaving so the test is deterministic.
-5. **Independent review.** A second AI agent reviews the diff read-only, often with real HTTP probes, on two axes: security/standards and spec/docs. Findings are fixed, rejected with a reason, or deferred in DESIGN.md.
-6. **Docs match evidence.** DESIGN.md marks each item Proposed / Implemented / Verified, and the verification table records the command and result. Overclaims found in review are corrected, not left.
-7. **One commit per logical change.** Conventional commit messages explain *why*. Every commit builds and passes its tests.
+5. **Independent review.** A second AI agent reviews the diff read-only, often with real HTTP probes, on two axes: security/standards and spec/docs. Findings are fixed, rejected with a reason, or deferred in DESIGN.md. For data-heavy changes the reviewer also captures the generated SQL and query plans, so claims like "filtered before paging" are checked against what the database actually runs.
+6. **Docs match evidence.** DESIGN.md marks each item Proposed / Implemented / Verified, and the verification table records the command and result. Overclaims found in review are corrected, not left. Numbers in the docs are copied from tool output, not written from memory; one red-run count written from memory was wrong and was corrected before commit.
+7. **Known limits are written down, not hidden.** Where a simpler choice has a cost (ASCII-only search case folding, offset paging, scan-based search), DESIGN.md says what breaks, at what scale, and the next step. A test pins the limitation, so a future fix is a deliberate change.
+8. **One commit per logical change.** Conventional commit messages explain *why*. Every commit builds and passes its tests.
 
 ## Commands
 
@@ -41,3 +42,4 @@ AI agents wrote most of the code and tests under my direction. I chose the scope
 | ac91935 | Demo identity, team listing, note create/read |
 | c7d2571 | This process document |
 | 9f5925d | Update and delete with optimistic concurrency |
+| (next) | Listing with paging and search |

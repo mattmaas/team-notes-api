@@ -21,12 +21,13 @@ dotnet test
 
 ## API overview
 
-Implemented so far (listing is next):
+All endpoints:
 
 | Method | Route | Result |
 |---|---|---|
 | GET | `/health` | 200, no identity needed |
 | GET | `/me/teams` | Your teams and your role in each |
+| GET | `/teams/{teamId}/notes?page=1&pageSize=20&q=text` | Notes you can see, newest first: `{ items, page, pageSize, totalCount }`. Items are summaries (no body). `pageSize` 1–100; `q` is a literal, case-insensitive (ASCII) match on title or body |
 | POST | `/teams/{teamId}/notes` | 201 with `Location` and `ETag`; body `{ "title", "body", "visibility": "Private" \| "Team" }` (default Private) |
 | GET | `/teams/{teamId}/notes/{noteId}` | 200 with `ETag`, or 404 if it doesn't exist or you can't see it |
 | PUT | `/teams/{teamId}/notes/{noteId}` | Replace `{ "title", "body" }`; requires `If-Match: "<version>"`; 200 with the new `ETag` |
@@ -44,7 +45,7 @@ Implemented so far (listing is next):
 
 Try it: open [`requests.http`](requests.http) in VS Code (REST Client) or Visual Studio, or use Swagger at `http://localhost:5080/swagger` (click **Authorize** and paste a user id).
 
-Access rules: you must be a member of the team. Team notes are visible to all members; private notes only to their author (team owners get no override). Anything you can't see returns 404, never 403, so ids can't be probed. Full contract in [docs/DESIGN.md](docs/DESIGN.md).
+Access rules: you must be a member of the team. Team notes are visible to all members; private notes only to their author (team owners get no override). Anything you can't see returns 404, never 403, so ids can't be probed. Lists and search apply the same rule inside the database query, so page sizes and `totalCount` never reveal private notes. Full contract in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Design choices I spent the most time on
 

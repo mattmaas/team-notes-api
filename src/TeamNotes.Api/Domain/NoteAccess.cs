@@ -1,3 +1,5 @@
+using System.Linq.Expressions;
+
 namespace TeamNotes.Api.Domain;
 
 /// <summary>
@@ -12,6 +14,14 @@ public static class NoteAccess
         ArgumentNullException.ThrowIfNull(note);
         return note.Visibility == NoteVisibility.Team || note.AuthorId == userId;
     }
+
+    /// <summary>
+    /// The same rule as <see cref="CanRead"/>, as an expression EF translates to SQL, so list queries filter hidden
+    /// notes in the database before counting and paging. A test checks that list results equal the notes
+    /// <see cref="CanRead"/> allows, for an owner and a member of the seeded team.
+    /// </summary>
+    public static Expression<Func<Note, bool>> ReadableBy(Guid userId) =>
+        note => note.Visibility == NoteVisibility.Team || note.AuthorId == userId;
 
     /// <summary>Anyone who can read a note can edit it: team notes are collaborative, private notes are the author's.</summary>
     public static bool CanEdit(Note note, Guid userId) => CanRead(note, userId);
