@@ -39,10 +39,11 @@ jobs:
 
       # No NuGet cache: setup-dotnet's cache keys on packages.lock.json, which this repo does not use, and restore
       # takes seconds for two projects.
-      - name: Set up .NET (version from global.json)
+      # global.json accepts any .NET 8 SDK (8.0.100+, latestFeature) and rejects 9+; CI installs the newest 8.0.
+      - name: Set up .NET 8
         uses: actions/setup-dotnet@v4
         with:
-          global-json-file: global.json
+          dotnet-version: "8.0.x"
 
       # NuGet audit runs during restore. Treating its warnings (NU1901-NU1904, low to critical) as errors makes a
       # vulnerable direct or transitive package fail the build. `dotnet list package --vulnerable` alone only
