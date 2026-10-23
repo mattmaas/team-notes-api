@@ -87,12 +87,17 @@ Authorize before evaluating preconditions. Support one strong quoted version ETa
 | D12 | Delete RESTRICT; schema implemented, referenced-team deletion tested | Avoid silently cascading shared work. Other user/team deletion lifecycle rules remain out of scope. |
 | D13 | Transactional fresh-database bootstrap; verified for environment/existing data/deletion/rollback | Supersedes per-row repair: that policy resurrected deleted demo notes. Empty-users guard is intentionally simple; no multi-instance guarantee. A trigger-induced note insert failure proves users, teams and memberships roll back too. |
 | D14 | Caller-owned test contexts, per-factory Pooling=False; verified by passing tests | No leaked DI scopes or global ClearAllPools affecting parallel tests. Direct test contexts mirror SQLite options; HTTP tests must exercise actual DI registration as it evolves. |
+| D15 | Remediate advisories by moving to the latest .NET 8 servicing packages plus a runtime engine-version test; verified | Smallest fix that stays on .NET 8 and supported dependency combinations. The test also catches a future downgrade. Rejected: suppressions, EF 9/10, manual native-provider pinning. |
 
 ## Dependencies and security audit
 
-Pinned packages: EF Core SQLite/Design 8.0.11, Swashbuckle 6.6.2, Mvc.Testing 8.0.11, FluentAssertions 6.12.2 plus scaffold test tooling. Each was added for persistence/migrations, browser documentation or real HTTP tests; no new packages in the persistence audit.
+Pinned packages, all on the .NET 8 line: EF Core SQLite/Design 8.0.32, Mvc.Testing 8.0.32, Swashbuckle 6.6.2, FluentAssertions 6.12.2 (kept below 8.x for licensing), xunit 2.9.3, xunit.runner.visualstudio 2.8.2, Microsoft.NET.Test.Sdk 17.14.1, coverlet.collector 6.0.4. Each exists for persistence/migrations, browser documentation or real HTTP tests.
 
-OPEN - dependency remediation required before delivery: `dotnet list TeamNotes.sln package --vulnerable --include-transitive` reported High advisories for SQLitePCLRaw.lib.e_sqlite3 2.1.6 (GHSA-2m69-gcr7-jv3q) and test-project transitive System.Net.Http 4.3.0 / System.Text.RegularExpressions 4.3.0. No vulnerabilities were suppressed. SQLite advisory covers versions <=2.1.11, so a token patch bump may not resolve it. Track a compatible dependency upgrade/native-provider decision separately; do not imply pinned equals secure. The service accepts no raw SQL, but that is not proof the native dependency is safe. No deployment before this review item is resolved.
+RESOLVED - the audit had reported High advisories for SQLitePCLRaw.lib.e_sqlite3 2.1.6 (GHSA-2m69-gcr7-jv3q, CVE-2025-6965: SQLite engines before 3.50.2) and for System.Net.Http 4.3.0 / System.Text.RegularExpressions 4.3.0, which reached the test project through xunit 2.5.3 → NETStandard.Library 1.6.1.
+- EF Core 8.0.11 → 8.0.32 (latest 8.0 servicing patch) brings SQLitePCLRaw 2.1.13. The advisory text lists `<= 2.1.11`, so the fix is verified at runtime, not inferred from version numbers: `DependencyTests` asserts `sqlite_version() >= 3.50.2`. Against the old 8.0.11 packages (in an isolated copy) the test fails with engine 3.41.2.
+- Test tooling moved to xunit 2.9.3 and its matching 2.x runner, which no longer pull in NETStandard.Library 1.6.1. Same-major updates only: xunit v3 and runner 3.x/4.x were rejected because they are a migration, not a fix.
+- Rejected: hand-pinning `SQLitePCLRaw.*` 3.x beside EF Core 8, an unsupported mix; moving to EF Core 9/10, which goes beyond the agreed .NET 8 target; suppressing advisories.
+- Result: `dotnet list TeamNotes.sln package --vulnerable --include-transitive` reports no vulnerable packages for either project. This is only as current as the NuGet advisory feed; CI should re-run it.
 
 ## Verification evidence
 
@@ -102,6 +107,7 @@ OPEN - dependency remediation required before delivery: `dotnet list TeamNotes.s
 | Audit tests before fixes | dotnet test TeamNotes.sln | 3 failed, 19 passed: production seeding, existing-user bootstrap, deleted-note resurrection |
 | Audit fixes | dotnet test TeamNotes.sln | 22 passed, 0 failed |
 | Additional independent literal boundary and rollback tests | dotnet test TeamNotes.sln | 24 passed, 0 failed; title 200/201 and body 50000/50001; seed failure rolls back all four tables |
+| Dependency remediation | vulnerability audit; dotnet test; build -warnaserror | No vulnerable packages; 25 passed; 0 warnings/errors. Engine-version test fails on old packages (3.41.2) in an isolated copy |
 | Audit build | dotnet build TeamNotes.sln -warnaserror | 0 warnings, 0 errors; not a dependency security clearance |
 | Independent mutation: original d445828 seeder/startup with new tests, isolated copy | Three seed regressions | All 3 fail as expected |
 | Independent mutation: remove Version.IsConcurrencyToken(), isolated copy | Stale-version test | Fails as expected; unprotected lost write detected |
@@ -122,3 +128,4 @@ Corrected duplicate-membership expectation is based on the EF/SQLite boundary: a
 - Baseline 767cb09: separate repository, run/test skeleton.
 - Persistence d445828: schema, initial migration, bootstrap and 13 tests.
 - Persistence audit: corrected fixture ownership, explicit Development gating, deletion-preserving bootstrap, stronger assertions, independent boundary values, rollback fault injection and 24 tests. Corrects earlier overclaims about seeding, authentication and concurrency. Dependency audit remains open as noted above.
+- Dependency remediation: EF Core / Mvc.Testing 8.0.32, xunit 2.9.3 tooling, engine-version regression test; audit clean.
