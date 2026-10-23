@@ -1,19 +1,15 @@
 using System.Net;
 using FluentAssertions;
-using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace TeamNotes.Api.Tests;
 
-public class HealthTests : IClassFixture<WebApplicationFactory<Program>>
+public class HealthTests
 {
-    private readonly WebApplicationFactory<Program> _factory;
-
-    public HealthTests(WebApplicationFactory<Program> factory) => _factory = factory;
-
     [Fact]
     public async Task GetHealth_ServiceRunning_ReturnsOk()
     {
-        var client = _factory.CreateClient();
+        using var factory = new TeamNotesFactory();
+        var client = factory.CreateClient();
 
         var response = await client.GetAsync("/health");
 
