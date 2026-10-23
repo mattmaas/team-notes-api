@@ -21,7 +21,26 @@ dotnet test
 
 ## API overview
 
-_TODO_
+Implemented so far (update, delete and listing are next):
+
+| Method | Route | Result |
+|---|---|---|
+| GET | `/health` | 200, no identity needed |
+| GET | `/me/teams` | Your teams and your role in each |
+| POST | `/teams/{teamId}/notes` | 201 with `Location` and `ETag`; body `{ "title", "body", "visibility": "Private" \| "Team" }` (default Private) |
+| GET | `/teams/{teamId}/notes/{noteId}` | 200 with `ETag`, or 404 if it doesn't exist or you can't see it |
+
+**Demo identity (Development only).** Send `X-User-Id` with a seeded user. This is impersonation for local review, not authentication; outside Development every protected endpoint returns 401.
+
+| User | Id | Apollo | Gemini |
+|---|---|---|---|
+| Alice | `11111111-1111-1111-1111-111111111111` | Owner | – |
+| Bob | `22222222-2222-2222-2222-222222222222` | Member | Member |
+| Carol | `33333333-3333-3333-3333-333333333333` | – | Owner |
+
+Try it: open [`requests.http`](requests.http) in VS Code (REST Client) or Visual Studio, or use Swagger at `http://localhost:5080/swagger` (click **Authorize** and paste a user id).
+
+Access rules: you must be a member of the team. Team notes are visible to all members; private notes only to their author (team owners get no override). Anything you can't see returns 404, never 403, so ids can't be probed. Full contract in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Design choices I spent the most time on
 

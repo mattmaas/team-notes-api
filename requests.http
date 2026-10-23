@@ -1,0 +1,67 @@
+### Team Notes API: runnable examples (VS Code REST Client / Visual Studio / Rider)
+### Start the API first: dotnet run --project src/TeamNotes.Api --launch-profile http
+### Seeded demo users (Development only, identity via X-User-Id; impersonation, not authentication):
+###   Alice 11111111-1111-1111-1111-111111111111  Owner of Apollo
+###   Bob   22222222-2222-2222-2222-222222222222  Member of Apollo and Gemini
+###   Carol 33333333-3333-3333-3333-333333333333  Owner of Gemini
+
+@baseUrl = http://localhost:5080
+@alice = 11111111-1111-1111-1111-111111111111
+@bob = 22222222-2222-2222-2222-222222222222
+@carol = 33333333-3333-3333-3333-333333333333
+@apollo = aaaaaaaa-0000-0000-0000-000000000001
+@gemini = aaaaaaaa-0000-0000-0000-000000000002
+@welcomeNote = bbbbbbbb-0000-0000-0000-000000000001
+@alicePrivateNote = bbbbbbbb-0000-0000-0000-000000000002
+
+### Health (no identity needed) -> 200
+GET {{baseUrl}}/health
+
+### No identity -> 401
+GET {{baseUrl}}/me/teams
+
+### Bob's teams -> Apollo and Gemini, both Member
+GET {{baseUrl}}/me/teams
+X-User-Id: {{bob}}
+
+### Bob creates a team-visible note in Apollo -> 201, Location, ETag "1"
+# @name created
+POST {{baseUrl}}/teams/{{apollo}}/notes
+X-User-Id: {{bob}}
+Content-Type: application/json
+
+{ "title": "Sprint goals", "body": "Ship the notes API", "visibility": "Team" }
+
+### Alice (Apollo owner) reads Bob's team note -> 200
+GET {{baseUrl}}{{created.response.headers.Location}}
+X-User-Id: {{alice}}
+
+### Carol is not in Apollo -> 404 (indistinguishable from a missing note)
+GET {{baseUrl}}{{created.response.headers.Location}}
+X-User-Id: {{carol}}
+
+### Bob reads Alice's PRIVATE note in his own team -> 404
+GET {{baseUrl}}/teams/{{apollo}}/notes/{{alicePrivateNote}}
+X-User-Id: {{bob}}
+
+### Alice reads her own private note -> 200
+GET {{baseUrl}}/teams/{{apollo}}/notes/{{alicePrivateNote}}
+X-User-Id: {{alice}}
+
+### Right note, wrong team route -> 404
+GET {{baseUrl}}/teams/{{gemini}}/notes/{{welcomeNote}}
+X-User-Id: {{bob}}
+
+### Blank title -> 400 ProblemDetails naming the field
+POST {{baseUrl}}/teams/{{apollo}}/notes
+X-User-Id: {{bob}}
+Content-Type: application/json
+
+{ "title": "   ", "body": "" }
+
+### Alice cannot post into Gemini -> 404
+POST {{baseUrl}}/teams/{{gemini}}/notes
+X-User-Id: {{alice}}
+Content-Type: application/json
+
+{ "title": "Intrusion", "body": "" }
