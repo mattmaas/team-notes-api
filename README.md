@@ -110,19 +110,29 @@ What I'd **stop** doing: writing `.http` walkthroughs by hand. The scenarios alr
 
 ## How I used AI
 
-I used AI coding agents heavily, and openly; the brief allows it. My rule was that the decisions are mine and every line is something I can explain.
+The brief allows AI tools, and I used them for throughout development.
 
-**What I did:** set the scope and approved each design decision (the sharing model, the 404-vs-403 contract, 428/400/412 for concurrency, SQLite and header identity as run-anywhere shortcuts) before code was written, and reviewed every slice before it was committed. I asked the agent for a hostile review of its own first plan before building. That review found real problems I then accepted fixes for: the first plan let team owners edit and delete members' private notes, and left delete without a concurrency check.
+**Tools:**
+- My own interview-helper app, only for its screen OCR: it captured the brief's text so I could give it to the coding agent word for word, and I closed it afterwards.
+- I used AiderDesk as the agent harness (Models of various strength were used depending on the subagent task difficulty, including Claude Sonnet, Claude Opus, and OpenAis GPT Sol models).
+- Sub-agents were used for implementation, test runs and code reviews, and reusable skills helped for questioning requirements, test-first work, edge cases, security review and commit hygiene.
+- Web search and the NuGet/GitHub advisory APIs for the SQLite vulnerability fix; `gh` and GitHub Actions to publish and run CI.
 
-**What the agents did:** most of the typing (endpoint code, tests, documentation drafts), running builds and tests, and research such as which .NET 8 package versions fix a SQLite security advisory.
+**What I decided and steered.** Before any code, I approved the scope and core design: one team per note, private vs team notes, 404 rather than 403 for anything you can't see, If-Match concurrency (428/400/412), SQLite, and a Development-only identity header. I asked for a hostile review of the agent's first plan. It found that plan let team owners edit and delete members' private notes and left delete without a concurrency check, and I took the fixes.
 
-**How I kept it honest**, because AI output looks right more often than it is right:
-- **Nothing counted as done without a passing test run I could see.**
-- **Mutation checks.** For each important rule the agent broke the code on purpose in a throwaway copy and confirmed a test failed. This caught four real gaps in the tests, including one where EF reordered inserts so a tie-breaker test passed without the tie-breaker.
-- **A second, independent agent reviewed each slice** read-only, with real HTTP calls and the actual SQL, instead of the authoring agent grading its own work. It found real bugs: for example, the response after an update could describe another writer's state under load.
-- **I asked for an audit of the tests themselves** after the first persistence slice ("did you cheat the tests?"). It found that the seed data came back after being deleted and that the "Development only" seeding wasn't actually restricted; both were fixed with regression tests.
-- **Rejections are recorded as well as acceptances**, with reasons, in DESIGN.md's decision record.
-- **Docs only claim what was verified.** When a number in the docs was written from memory instead of copied from tool output, it was wrong, and it was corrected.
+After that I let the agent make implementation-level decisions itself, on condition that each one was logged with the alternative it rejected. I read the evidence after each slice rather than every diff before commit. I redirected it to audit its own tests ("did you cheat?"), to document the process as it went, to stop at a checkpoint before stretch goals, and to run the published repo the way a reviewer would.
+
+**Other techniques I used:**
+- Nothing counted as done without a passing test run in the output.
+- **Mutation checks:** the agent broke each important rule in a throwaway copy and confirmed a test failed. This caught four gaps, such as a tie-breaker test that passed without the tie-breaker because EF reordered inserts.
+- A review agent in a fresh context checked the API slices and the final README with real HTTP calls and the actual SQL. It found real bugs, such as an update response that could show another writer's state under load. It's the same kind of model, so I treat it as a second look, not independent proof.
+- The test audit found that deleted demo notes came back after a restart and that "Development-only" seeding wasn't actually restricted. Both were fixed with regression tests.
+- Docs claim only what was verified. A number written from memory was wrong and was corrected from tool output.
+
+**Where the AI went wrong.**
+- The dedicated review agent sent back its own prompt instead of a review several times, and the Aider edit tool twice made no changes, so I switched to other agents rather than trust silence.
+- A set of shell commands it gave me ran in the wrong folder and committed to a scratch repo (local and harmless, but it's why every step ends with a state check).
+- And several tests passed for the wrong reason until the mutation checks exposed them.
 
 The process is written up in [docs/PROCESS.md](docs/PROCESS.md).
 
