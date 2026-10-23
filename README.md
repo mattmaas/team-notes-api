@@ -1,5 +1,7 @@
 # Team Notes API
 
+[![CI](https://github.com/mattmaas/team-notes-api/actions/workflows/ci.yml/badge.svg)](https://github.com/mattmaas/team-notes-api/actions/workflows/ci.yml)
+
 A REST backend for notes shared among several small teams. Members of a team keep private notes and collaborate on team notes, without silently overwriting each other's edits. Built with .NET 8 minimal APIs, EF Core and SQLite; no external services are needed to run it.
 
 **Docs:** [design decisions and contract](docs/DESIGN.md) · [how it was built and verified](docs/PROCESS.md) · [runnable requests](requests.http)
@@ -104,7 +106,7 @@ In the order I'd do them:
 
 What I'd **stop** doing: writing `.http` walkthroughs by hand. The scenarios already exist as integration tests, and with more time I'd generate API docs from the OpenAPI spec instead of maintaining a second copy of the examples.
 
-**Known limits today** (details and measurements in DESIGN.md): search case folding is ASCII-only (pinned by a test); search scans the team's notes (measured at about 30–70 ms with 20,000 notes in one team); offset paging can shift notes between pages during concurrent edits; and CI has been rehearsed locally but hasn't yet run on GitHub.
+**Known limits today** (details and measurements in DESIGN.md): search case folding is ASCII-only (pinned by a test); search scans the team's notes (measured at about 30–70 ms with 20,000 notes in one team); offset paging can shift notes between pages during concurrent edits.
 
 ## How I used AI
 
