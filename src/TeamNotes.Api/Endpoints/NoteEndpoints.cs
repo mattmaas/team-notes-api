@@ -16,7 +16,7 @@ public static class NoteEndpoints
         var notes = app.MapGroup("/teams/{teamId:guid}/notes").RequireAuthorization();
         notes.MapGet("/", ListNotes);
         notes.MapPost("/", CreateNote);
-        notes.MapGet("/{noteId:guid}", GetNote).WithName(nameof(GetNote));
+        notes.MapGet("/{noteId:guid}", GetNote);
         notes.MapPut("/{noteId:guid}", UpdateNote);
         notes.MapDelete("/{noteId:guid}", DeleteNote);
     }
@@ -42,7 +42,7 @@ public static class NoteEndpoints
         Guid teamId, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
     {
         var userId = user.GetUserId();
-        if (!await IsMemberAsync(db, userId, teamId, ct))
+        if (await FindMembershipAsync(db, userId, teamId, ct) is null)
         {
             return TypedResults.NotFound();
         }
@@ -95,7 +95,7 @@ public static class NoteEndpoints
         var userId = user.GetUserId();
 
         // Non-members get 404 whether or not the team exists, so team ids cannot be probed.
-        if (!await IsMemberAsync(db, userId, teamId, ct))
+        if (await FindMembershipAsync(db, userId, teamId, ct) is null)
         {
             return TypedResults.NotFound();
         }
@@ -130,7 +130,7 @@ public static class NoteEndpoints
         Guid teamId, Guid noteId, ClaimsPrincipal user, NotesDbContext db, HttpContext http, CancellationToken ct)
     {
         var userId = user.GetUserId();
-        if (!await IsMemberAsync(db, userId, teamId, ct))
+        if (await FindMembershipAsync(db, userId, teamId, ct) is null)
         {
             return TypedResults.NotFound();
         }
@@ -285,7 +285,4 @@ public static class NoteEndpoints
 
     private static Task<Note?> FindNoteAsync(NotesDbContext db, Guid teamId, Guid noteId, CancellationToken ct) =>
         db.Notes.AsNoTracking().SingleOrDefaultAsync(n => n.Id == noteId && n.TeamId == teamId, ct);
-
-    private static Task<bool> IsMemberAsync(NotesDbContext db, Guid userId, Guid teamId, CancellationToken ct) =>
-        db.Memberships.AnyAsync(m => m.UserId == userId && m.TeamId == teamId, ct);
 }
