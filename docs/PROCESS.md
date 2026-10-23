@@ -19,8 +19,10 @@ A short record of the working process, kept current as the project moves. Design
 ```bash
 dotnet test                                                  # all tests
 dotnet build -warnaserror                                    # warnings fail the build
-dotnet list package --vulnerable --include-transitive        # dependency advisories
+dotnet list package --vulnerable --include-transitive        # dependency advisories (report only: exits 0 even when it finds some)
 ```
+
+CI runs the same loop on every push (`.github/workflows/ci.yml`). Its gate is checked the same way as the code: the audit step was run against a copy holding the old vulnerable packages, to confirm it fails before trusting it to pass. That check showed the report command alone can't be a gate, because it exits 0, so CI fails on restore-time audit errors instead.
 
 ## Use of AI
 
@@ -43,3 +45,4 @@ AI agents wrote most of the code and tests under my direction. I chose the scope
 | c7d2571 | This process document |
 | 9f5925d | Update and delete with optimistic concurrency |
 | d40c904 | Listing with paging and search |
+| (next) | CI workflow |

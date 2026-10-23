@@ -19,6 +19,14 @@ dotnet run --project src/TeamNotes.Api --launch-profile http
 dotnet test
 ```
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same checks on Ubuntu and Windows for every push and pull request: restore with a dependency audit that fails on any known-vulnerable package, a warnings-as-errors build, and the tests. To run the same gate locally:
+
+```bash
+dotnet restore -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -warnaserror:NU1901,NU1902,NU1903,NU1904
+dotnet build --no-restore -warnaserror
+dotnet test --no-build
+```
+
 ## API overview
 
 All endpoints:
